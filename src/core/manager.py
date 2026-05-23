@@ -3,18 +3,22 @@ Library (collection) manager: create/delete/list libraries (Chroma collections)
 """
 
 from typing import List
-
 class LibraryManager:
-    """Placeholder for library lifecycle operations."""
+    """Compatibility wrapper that delegates to `core.library_manager.LibraryManager`.
+
+    This allows older imports from `core.manager` to continue working.
+    """
+
+    def __init__(self, data_root: str = "data"):
+        from core.library_manager import LibraryManager as LM
+
+        self._lm = LM(data_root=data_root)
 
     def list_libraries(self) -> List[str]:
-        """Return list of library names."""
-        return ["base"]
+        return [l.get("name") for l in self._lm.list_libraries()]
 
-    def create_library(self, name: str) -> None:
-        """Create a new library/collection."""
-        pass
+    def create_library(self, name: str, description: str = "") -> None:
+        self._lm.create_library(name, description=description)
 
     def delete_library(self, name: str) -> None:
-        """Delete a library/collection."""
-        pass
+        self._lm.delete_library(name)

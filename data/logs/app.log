@@ -1,0 +1,8 @@
+2026-05-23 17:59:31,806 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-23 17:59:32,296 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-23 18:00:42,561 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-23 18:00:42,908 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-23 18:03:47,270 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-23 18:03:47,613 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-23 18:04:03,714 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-23 18:04:04,056 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"

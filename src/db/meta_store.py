@@ -22,3 +22,18 @@ class MetaStore:
         )
         """)
         self.conn.commit()
+
+    def add_chat(self, chat_id: str, library: str, title: str) -> None:
+        cur = self.conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO chats (id, library, title) VALUES (?, ?, ?)", (chat_id, library, title))
+        self.conn.commit()
+
+    def delete_chat(self, chat_id: str) -> None:
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
+        self.conn.commit()
+
+    def list_chats(self, library: str):
+        cur = self.conn.cursor()
+        cur.execute("SELECT id, title FROM chats WHERE library = ?", (library,))
+        return [{"id": row[0], "title": row[1]} for row in cur.fetchall()]
