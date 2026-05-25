@@ -4,10 +4,9 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from core.retrieval import retrieve_relevant
 from core.embeddings import _batched
 from db.chroma_client import clear_chroma_system_cache
-from db.vector_store import build_vector_store, sync_vector_store
+from db.vector_store import build_vector_store, search_vector_store, sync_vector_store
 
 
 def test_chroma_ingest_and_retrieve():
@@ -23,7 +22,8 @@ def test_chroma_ingest_and_retrieve():
         res = build_vector_store(lib, data_root=data_root, embedding_provider="hash")
         assert res["inserted"] > 0
 
-        results = retrieve_relevant(
+        sync_vector_store(lib, data_root=data_root, embedding_provider="hash")
+        results = search_vector_store(
             lib,
             "数据库",
             k=5,
@@ -47,7 +47,7 @@ def test_sync_removes_deleted_documents():
         doc_path.unlink()
         sync_vector_store(lib, data_root=data_root, embedding_provider="hash")
 
-        results = retrieve_relevant(
+        results = search_vector_store(
             lib,
             "数据库",
             k=5,

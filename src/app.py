@@ -1,11 +1,11 @@
+"""Streamlit 应用入口。
+
+运行：
+    streamlit run src/app.py
 """
-Main entry for the Database AI Assistant Streamlit UI.
-Not executed by the scaffolding step; placeholder only.
-"""
 
-import streamlit as st
+from ui.streamlit_app import main
 
-st.set_page_config(page_title="Database AI Assistant")
 
-st.title("Database AI Assistant")
-st.write("Please open `src/ui/streamlit_ui.py` for the UI components.")
+if __name__ == "__main__":
+    main()
