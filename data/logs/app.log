@@ -6,3 +6,62 @@
 2026-05-23 18:03:47,613 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
 2026-05-23 18:04:03,714 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
 2026-05-23 18:04:04,056 INFO HTTP Request: HEAD https://huggingface.co/gpt-3.5-turbo/resolve/main/config.json "HTTP/1.1 401 Unauthorized"
+2026-05-25 15:51:22,926 ERROR OpenAI-compatible chat failed
+Traceback (most recent call last):
+  File "E:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\src\core\llm.py", line 41, in generate_reply
+    return _openai_compatible_chat(messages, config.model, config.api_key, config.base_url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\src\core\llm.py", line 96, in _openai_compatible_chat
+    client = openai.OpenAI(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "e:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\.venv\Lib\site-packages\openai\_client.py", line 194, in __init__
+    raise OpenAIError(
+openai.OpenAIError: Missing credentials. Please pass an `api_key`, `workload_identity`, `admin_api_key`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.
+2026-05-25 15:52:22,434 ERROR OpenAI-compatible embedding failed; using hash fallback
+Traceback (most recent call last):
+  File "E:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\src\core\embeddings.py", line 41, in get_embeddings
+    return _openai_compatible_embeddings(texts, config.model, config.api_key, config.base_url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\src\core\embeddings.py", line 72, in _openai_compatible_embeddings
+    client = openai.OpenAI(**kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "e:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\.venv\Lib\site-packages\openai\_client.py", line 194, in __init__
+    raise OpenAIError(
+openai.OpenAIError: Missing credentials. Please pass an `api_key`, `workload_identity`, `admin_api_key`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.
+2026-05-25 16:15:11,181 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 16:15:11,828 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 16:15:33,799 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 16:16:23,096 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 400 Bad Request"
+2026-05-25 16:16:23,096 ERROR OpenAI-compatible embedding failed; using hash fallback
+Traceback (most recent call last):
+  File "E:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\src\core\embeddings.py", line 41, in get_embeddings
+    return _openai_compatible_embeddings(texts, config.model, config.api_key, config.base_url)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\src\core\embeddings.py", line 73, in _openai_compatible_embeddings
+    resp = client.embeddings.create(input=texts, model=model)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "e:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\.venv\Lib\site-packages\openai\resources\embeddings.py", line 136, in create
+    return self._post(
+           ^^^^^^^^^^^
+  File "e:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\.venv\Lib\site-packages\openai\_base_client.py", line 1332, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "e:\ForWork\VSCode\DatabaseAIAssistant\Database-AI-Assistant\.venv\Lib\site-packages\openai\_base_client.py", line 1105, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.BadRequestError: Error code: 400 - {'error': {'message': '<400> InternalError.Algo.InvalidParameter: Value error, batch size is invalid, it should not be larger than 25.: input.contents', 'type': 'InvalidParameter', 'param': None, 'code': 'InvalidParameter'}, 'id': '9be956a6-9cd5-969f-8ea8-2f33e2e80619', 'request_id': '9be956a6-9cd5-969f-8ea8-2f33e2e80619'}
+2026-05-25 16:21:56,340 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 16:21:57,001 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 16:22:35,856 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 17:06:45,744 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 17:06:46,671 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 17:06:47,579 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 17:06:48,539 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 17:07:47,223 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 17:07:47,882 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 17:08:35,201 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 17:10:04,330 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 17:10:04,977 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 17:10:29,430 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 17:12:26,472 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"
+2026-05-25 17:12:27,305 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"
+2026-05-25 17:13:28,982 INFO HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions "HTTP/1.1 200 OK"

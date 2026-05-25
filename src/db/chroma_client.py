@@ -1,50 +1,68 @@
-"""
-Chroma client wrapper: connect and return collection for a given library name
-"""
+"""Chroma 向量库客户端封装。"""
+
 from pathlib import Path
 from typing import Optional
+import hashlib
+import logging
+import os
 
-try:
-    from chromadb import Client
-    from chromadb.config import Settings
-except Exception:
-    Client = None
+import chromadb
+from chromadb.config import Settings
+
+log = logging.getLogger(__name__)
 
 
 class ChromaClient:
-    """Wrapper that supports per-library persistent directories under a data root.
-
-    If chromadb is not installed the methods degrade gracefully.
-    """
+    """按知识库管理 Chroma PersistentClient 和 Collection。"""
 
     def __init__(self, data_root: str = "data", chroma_settings: Optional[dict] = None):
         self.data_root = Path(data_root)
         self.chroma_settings = chroma_settings or {}
-        self._clients = {}
+        configured_dir = os.getenv("CHROMA_PERSIST_DIRECTORY") if str(self.data_root) == "data" else None
+        persist_dir = configured_dir or str(self.data_root / "chroma")
+        self.persist_dir = Path(persist_dir)
+        self.persist_dir.mkdir(parents=True, exist_ok=True)
+        self._client = None
 
-    def _client_for(self, library_name: str):
-        # Create or reuse a chromadb Client configured to persist under data/chroma/<library>
-        if Client is None:
-            return None
-        if library_name in self._clients:
-            return self._clients[library_name]
-        persist_dir = str(self.data_root / "chroma" / library_name)
-        settings = {**self.chroma_settings, "persist_directory": persist_dir}
-        try:
-            client = Client(Settings(**settings))
-        except Exception:
-            # fallback to default client
-            client = Client()
-        self._clients[library_name] = client
-        return client
+    @property
+    def client(self):
+        if self._client is None:
+            settings = Settings(anonymized_telemetry=False, **self.chroma_settings)
+            self._client = chromadb.PersistentClient(path=str(self.persist_dir), settings=settings)
+        return self._client
 
-    def get_collection(self, library_name: str, collection_name: Optional[str] = None):
-        """Return a chroma collection object for the library. If chromadb not available, return None."""
-        client = self._client_for(library_name)
-        if client is None:
-            return None
-        name = collection_name or library_name
+    def collection_name(self, library_name: str) -> str:
+        """Chroma collection 名称只能包含有限字符，这里统一做稳定映射。"""
+        digest = hashlib.sha1(library_name.encode("utf-8")).hexdigest()[:12]
+        return f"library_{digest}"
+
+    def get_collection(self, library_name: str):
+        name = self.collection_name(library_name)
+        return self.client.get_or_create_collection(name=name, metadata={"library": library_name})
+
+    def reset_collection(self, library_name: str):
+        name = self.collection_name(library_name)
         try:
-            return client.get_collection(name)
+            self.client.delete_collection(name)
         except Exception:
-            return client.create_collection(name)
+            pass
+        return self.client.get_or_create_collection(name=name, metadata={"library": library_name})
+
+    def delete_collection(self, library_name: str) -> bool:
+        name = self.collection_name(library_name)
+        try:
+            self.client.delete_collection(name)
+            return True
+        except Exception:
+            log.exception("删除 Chroma collection 失败：%s", library_name)
+            return False
+
+
+def clear_chroma_system_cache():
+    """测试或批处理结束后释放 Chroma 全局缓存，降低 Windows 文件锁概率。"""
+    try:
+        from chromadb.api.shared_system_client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+    except Exception:
+        pass

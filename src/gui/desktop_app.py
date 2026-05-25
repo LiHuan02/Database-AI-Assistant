@@ -1,204 +1,127 @@
-"""
-Minimal desktop GUI for Database AI Assistant using PySimpleGUI.
-Features:
-- Library selector + create
-- Chat list per library
-- Chat view showing history
-- API key and model selector inputs
-- Send message (appends to chat history and simulates assistant response)
-
-This is a local GUI skeleton; actual LLM calls / retrieval not executed here.
-"""
+"""Desktop GUI for Database AI Assistant."""
 
 import os
-import sys
 import shutil
-import traceback
+import sys
 import threading
+import traceback
 
-# ensure src is on path so imports of core/ work when running this script directly
 src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if src_path not in sys.path:
     sys.path.insert(0, src_path)
 
-# Import PySimpleGUI first - check if available
 try:
     import PySimpleGUI as sg
-except ImportError as e:
-    print(f"Error: PySimpleGUI not installed. Run: pip install PySimpleGUI")
-    print(f"Details: {e}")
+except ImportError as exc:
+    print("PySimpleGUI is not installed. Run: pip install PySimpleGUI")
+    print(exc)
     sys.exit(1)
 
-# Import other modules with error handling
 try:
     from core.chat_manager import ChatManager
-    from db.chroma_client import ChromaClient
-    from core import ingest as ingest_module
-    from core import retrieval as retrieval_module
     from core.library_manager import LibraryManager
-    from db import vector_store as vector_store_module
-    from core.llm import generate_reply
     from core.pipeline import lcel_pipeline
+    from db.vector_store import sync_vector_store
+    from utils.config import get_embedding_config, get_llm_config
     from utils.logger import get_logger
-    import re
-except ImportError as e:
-    print(f"Error importing modules: {e}")
+except ImportError as exc:
+    print(f"Error importing modules: {exc}")
     traceback.print_exc()
     sys.exit(1)
+
 
 DATA_ROOT = "data"
 
 
 def main():
-    try:
-        cm = ChatManager(data_root=DATA_ROOT)
-        cc = ChromaClient(data_root=DATA_ROOT)  # kept for future use
-        lm = LibraryManager(data_root=DATA_ROOT)
-        log = get_logger()
-    except Exception as e:
-        get_logger().exception("Error initializing components")
-        traceback.print_exc()
-        sg.popup_error(f"初始化失败: {e}")
-        return
+    log = get_logger()
+    cm = ChatManager(data_root=DATA_ROOT)
+    lm = LibraryManager(data_root=DATA_ROOT)
+    lm.create_library("base")
 
-    # Ensure base library exists
-    base_lib_dir = os.path.join(DATA_ROOT, "libraries", "base")
-    os.makedirs(base_lib_dir, exist_ok=True)
-
-    libraries = [p.name for p in os.scandir(os.path.join(DATA_ROOT, "libraries")) if p.is_dir()] if os.path.exists(os.path.join(DATA_ROOT, "libraries")) else ["base"]
+    llm_config = get_llm_config()
+    embedding_config = get_embedding_config()
 
     sg.theme("LightBlue")
+    libraries = _list_libraries()
 
-    # Left column: libraries and chats
     lib_column = [
-        [sg.Text("Libraries", font=(None, 12, 'bold'))],
-        [sg.Combo(libraries, key='-LIB-', size=(24, 1), enable_events=True, readonly=True)],
-        [sg.Button('Refresh', key='-REFRESH_LIBS-'), sg.Input(key='-NEW_LIB-', size=(12,1)), sg.Button('Create', key='-CREATE_LIB-')],
+        [sg.Text("知识库", font=(None, 12, "bold"))],
+        [sg.Combo(libraries, default_value=libraries[0] if libraries else "base", key="-LIB-", size=(24, 1), enable_events=True, readonly=True)],
+        [sg.Button("刷新", key="-REFRESH_LIBS-"), sg.Input(key="-NEW_LIB-", size=(12, 1)), sg.Button("新建", key="-CREATE_LIB-")],
         [sg.HorizontalSeparator()],
-        [sg.Text('Chats', font=(None, 12, 'bold'))],
-        [sg.Listbox(values=[], size=(24, 20), key='-CHAT_LIST-', enable_events=True)],
-        [sg.Input(key='-NEW_CHAT_TITLE-', size=(18,1)), sg.Button('New Chat', key='-NEW_CHAT-')],
-        [sg.Button('Delete Chat', key='-DEL_CHAT-')]
+        [sg.Text("对话", font=(None, 12, "bold"))],
+        [sg.Listbox(values=[], size=(28, 19), key="-CHAT_LIST-", enable_events=True)],
+        [sg.Input(key="-NEW_CHAT_TITLE-", size=(18, 1)), sg.Button("新建对话", key="-NEW_CHAT-")],
+        [sg.Button("删除对话", key="-DEL_CHAT-")],
     ]
 
-    # Center column: main chat view
     chat_column = [
-        [sg.Text('Chat', font=(None, 14, 'bold'))],
-        [sg.Multiline('', size=(80, 30), key='-CHAT_VIEW-', disabled=True, autoscroll=True)],
-        [sg.Input(key='-USER_INPUT-', size=(60,1)), sg.Button('Send', key='-SEND-')],
-        [sg.Checkbox('附带来源到答案', key='-ATTACH_SOURCES-'), sg.Button('显示来源', key='-SHOW_SOURCES-')]
+        [sg.Text("问答", font=(None, 14, "bold"))],
+        [sg.Multiline("", size=(82, 30), key="-CHAT_VIEW-", disabled=True, autoscroll=True)],
+        [sg.Input(key="-USER_INPUT-", size=(66, 1)), sg.Button("发送", key="-SEND-")],
+        [sg.Checkbox("回答附带来源", key="-ATTACH_SOURCES-", default=True), sg.Button("显示上次来源", key="-SHOW_SOURCES-")],
+        [sg.Multiline("", size=(82, 8), key="-SOURCE_VIEW-", disabled=True)],
     ]
 
-    # Right column: knowledge base docs and retrieval
-    kb_column = [
-        [sg.Text('Knowledge Base', font=(None, 12, 'bold'))],
-        [sg.Listbox(values=[], size=(40, 10), key='-DOC_LIST-', enable_events=True)],
-        [sg.Button('Open', key='-OPEN_DOC-'), sg.Button('Delete', key='-DEL_DOC-')],
-        [sg.Button('Build Vector Store', key='-BUILD_VS-')],
-        [sg.Text('', key='-INGEST_STATUS-')],
-        [sg.HorizontalSeparator()],
-        [sg.Text('Retrieval Results', font=(None, 12, 'bold'))],
-        [sg.Listbox(values=[], size=(40, 8), key='-RESULT_LIST-', enable_events=True)],
-        [sg.Button('Insert to Input', key='-INSERT_RESULT-'), sg.Button('Insert as System', key='-INSERT_SYS-'), sg.Button('Insert as Assistant', key='-INSERT_AS_ASSIST-')],
-        [sg.Multiline('', size=(40, 10), key='-RESULT_VIEW-', disabled=True)]
+    docs_column = [
+        [sg.Text("文档", font=(None, 12, "bold"))],
+        [sg.Listbox(values=[], size=(38, 19), key="-DOC_LIST-")],
+        [sg.Input(key="-DOC_PATH-", visible=False), sg.FileBrowse("添加文档", target="-DOC_PATH-", key="-BROWSE_DOC-"), sg.Button("导入", key="-ADD_DOC-")],
+        [sg.Button("删除文档", key="-DEL_DOC-")],
+        [sg.Text("向量库会在文档变化或提问前自动同步。", key="-SYNC_STATUS-", size=(38, 2))],
     ]
 
-    # Bottom settings row
     settings = [
-        [sg.Text('API Key:'), sg.Input('', key='-API_KEY-', password_char='*', size=(30,1))],
-        [sg.Text('LLM Provider:'), sg.Combo(['openai','azure_openai','openrouter','anthropic','local'], default_value='openai', key='-PROVIDER-'), sg.Text('LLM Model:'), sg.Input('gpt-3.5-turbo', key='-MODEL-', size=(20,1))],
-        [sg.Text('Embed Provider:'), sg.Combo(['openai','local','hash'], default_value='openai', key='-EMBED_PROVIDER-'), sg.Text('Embed Model:'), sg.Input('text-embedding-3-small', key='-EMBED_MODEL-', size=(20,1))]
+        [sg.Text("LLM Provider"), sg.Input(llm_config.provider, key="-LLM_PROVIDER-", size=(14, 1)), sg.Text("Model"), sg.Input(llm_config.model, key="-LLM_MODEL-", size=(24, 1))],
+        [sg.Text("LLM Base URL"), sg.Input(llm_config.base_url or "", key="-LLM_BASE_URL-", size=(48, 1))],
+        [sg.Text("Embedding Provider"), sg.Input(embedding_config.provider, key="-EMBED_PROVIDER-", size=(14, 1)), sg.Text("Model"), sg.Input(embedding_config.model, key="-EMBED_MODEL-", size=(24, 1))],
+        [sg.Text("Embedding Base URL"), sg.Input(embedding_config.base_url or "", key="-EMBED_BASE_URL-", size=(48, 1))],
     ]
 
     layout = [
-        [sg.Column(lib_column), sg.VSeperator(), sg.Column(chat_column), sg.VSeperator(), sg.Column(kb_column)],
+        [sg.Column(lib_column), sg.VSeperator(), sg.Column(chat_column), sg.VSeperator(), sg.Column(docs_column)],
         [sg.HorizontalSeparator()],
-        [sg.Column(settings)]
+        [sg.Column(settings)],
     ]
 
-    window = sg.Window('Database AI Assistant (Desktop)', layout, finalize=True)
+    window = sg.Window("Database AI Assistant", layout, finalize=True)
 
-    current_lib = 'base'
+    current_lib = libraries[0] if libraries else "base"
     current_chat_id = None
-    results_cache = []
-    system_contexts = []
-    last_query = ''
     last_contexts = []
 
     def refresh_libs():
         nonlocal libraries, current_lib
-        p = os.path.join(DATA_ROOT, 'libraries')
-        if not os.path.exists(p):
-            libraries = ['base']
-        else:
-            libraries = [d.name for d in os.scandir(p) if d.is_dir()]
-        window['-LIB-'].update(values=libraries)
-        # set selection to first library and update current_lib
-        if libraries:
-            current_lib = libraries[0]
-            window['-LIB-'].update(value=current_lib)
+        libraries = _list_libraries()
+        if current_lib not in libraries:
+            current_lib = libraries[0] if libraries else "base"
+        window["-LIB-"].update(values=libraries, value=current_lib)
 
     def refresh_chats():
-        if current_lib:
-            chats = cm.list_chats(current_lib)
-            names = [f"{c.get('title') or c.get('id')} ({c.get('id')})" for c in chats]
-            window['-CHAT_LIST-'].update(names)
-        refresh_docs()
-
+        chats = cm.list_chats(current_lib)
+        names = [f"{item.get('title') or item.get('id')} ({item.get('id')})" for item in chats]
+        window["-CHAT_LIST-"].update(names)
 
     def refresh_docs():
-        ddir = os.path.join(DATA_ROOT, 'libraries', current_lib, 'docs')
-        vals = []
-        if os.path.exists(ddir):
-            vals = [f for f in os.listdir(ddir) if os.path.isfile(os.path.join(ddir, f))]
-        window['-DOC_LIST-'].update(vals)
-
-    def _highlight_text(text: str, query: str) -> str:
-        """Return text with query terms wrapped for visual emphasis."""
-        if not query or not text:
-            return text
-        try:
-            terms = [re.escape(t) for t in query.split() if t.strip()]
-            if not terms:
-                return text
-            pattern = re.compile("(" + "|".join(terms) + ")", re.IGNORECASE)
-            # wrap matches with >>> <<< markers
-            return pattern.sub(lambda m: f"»{m.group(0)}«", text)
-        except Exception:
-            return text
-
-    def run_in_background(fn, *args, event_key=None):
-        """Run fn(*args) in a background thread and post result to window via event_key."""
-        def _worker():
-            try:
-                res = fn(*args)
-                window.write_event_value(event_key, {'success': True, 'result': res})
-            except Exception as e:
-                log.exception('background task failed')
-                window.write_event_value(event_key, {'success': False, 'error': str(e)})
-
-        t = threading.Thread(target=_worker, daemon=True)
-        t.start()
-
-    def _format_message(m: dict) -> str:
-        role = m.get('role', '')
-        text = m.get('text', '')
-        ts = m.get('ts') or ''
-        if ts:
-            try:
-                # show only time portion
-                t = ts.replace('T', ' ').split('.')[0]
-            except Exception:
-                t = ts
-            head = f"[{t}] {role.upper()}:"
-        else:
-            head = f"{role.upper()}:"
-        return f"{head}\n{text}\n"
+        docs_dir = _docs_dir(current_lib)
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        docs = [p.name for p in sorted(docs_dir.iterdir()) if p.is_file()]
+        window["-DOC_LIST-"].update(docs)
 
     def show_messages(chat_id):
-        msgs = cm.get_messages(current_lib, chat_id)
-        lines = [ _format_message(m) for m in msgs ]
-        window['-CHAT_VIEW-'].update('\n'.join(lines))
+        messages = cm.get_messages(current_lib, chat_id)
+        window["-CHAT_VIEW-"].update("\n".join(_format_message(item) for item in messages))
+
+    def run_in_background(fn, *args, event_key):
+        def worker():
+            try:
+                window.write_event_value(event_key, {"success": True, "result": fn(*args)})
+            except Exception as exc:
+                log.exception("background task failed")
+                window.write_event_value(event_key, {"success": False, "error": str(exc)})
+
+        threading.Thread(target=worker, daemon=True).start()
 
     refresh_libs()
     refresh_chats()
@@ -206,240 +129,172 @@ def main():
 
     while True:
         event, values = window.read()
-        if event in (sg.WIN_CLOSED, 'Exit'):
+        if event in (sg.WIN_CLOSED, "Exit"):
             break
-        if event == '-REFRESH_LIBS-':
+
+        if event == "-REFRESH_LIBS-":
             refresh_libs()
-        if event == '-CREATE_LIB-':
-            name = values.get('-NEW_LIB-')
-            if name:
-                lm.create_library(name)
-                refresh_libs()
-        # Ingest via file browse removed; use Build Vector Store which scans docs directory
-        if event == '-BUILD_VS-':
-            # build vector store from all docs in current library (use selected embedding provider/model)
-            window['-INGEST_STATUS-'].update('开始构建向量库...')
-            embed_provider = values.get('-EMBED_PROVIDER-') or 'openai'
-            embed_model = values.get('-EMBED_MODEL-') or None
-            run_in_background(vector_store_module.build_vector_store, current_lib, DATA_ROOT, values.get('-API_KEY-'), embed_provider, embed_model, event_key='-BG_BUILD-')
-        
-        if event == '-BG_BUILD-':
-            payload = values.get(event)
-            if payload and payload.get('success'):
-                res = payload.get('result') or {}
-                if res.get('error'):
-                    window['-INGEST_STATUS-'].update(f"构建失败: {res.get('error')}")
-                else:
-                    window['-INGEST_STATUS-'].update(f"构建完成: {res.get('inserted',0)} chunks")
-            else:
-                err = payload.get('error') if payload else '未知错误'
-                log.exception('background build error: %s', err)
-                window['-INGEST_STATUS-'].update(f"构建异常: {err}")
-                sg.popup_error(f"构建异常: {err}")
-        if event == '-LIB-':
-            current_lib = values.get('-LIB-') or 'base'
             refresh_chats()
             refresh_docs()
-        if event == '-NEW_CHAT-':
-            title = values.get('-NEW_CHAT_TITLE-') or 'New Chat'
-            chat_id = cm.create_chat(current_lib, title)
+
+        if event == "-CREATE_LIB-":
+            name = (values.get("-NEW_LIB-") or "").strip()
+            if name:
+                lm.create_library(name)
+                current_lib = name
+                refresh_libs()
+                refresh_chats()
+                refresh_docs()
+
+        if event == "-LIB-":
+            current_lib = values.get("-LIB-") or "base"
+            current_chat_id = None
+            window["-CHAT_VIEW-"].update("")
+            window["-SOURCE_VIEW-"].update("")
             refresh_chats()
-        if event == '-CHAT_LIST-':
-            selection = values.get('-CHAT_LIST-')
+            refresh_docs()
+
+        if event == "-NEW_CHAT-":
+            title = values.get("-NEW_CHAT_TITLE-") or "New Chat"
+            current_chat_id = cm.create_chat(current_lib, title)
+            refresh_chats()
+            show_messages(current_chat_id)
+
+        if event == "-CHAT_LIST-":
+            selection = values.get("-CHAT_LIST-")
             if selection:
-                # extract chat id from display
-                s = selection[0]
-                if '(' in s and s.endswith(')'):
-                    chat_id = s.split('(')[-1].strip(')')
-                    current_chat_id = chat_id
-                    show_messages(chat_id)
-        if event == '-DEL_CHAT-':
-            sel = values.get('-CHAT_LIST-')
-            if sel:
-                s = sel[0]
-                if '(' in s and s.endswith(')'):
-                    chat_id = s.split('(')[-1].strip(')')
-                    cm.delete_chat(current_lib, chat_id)
-                    current_chat_id = None
-                    window['-CHAT_VIEW-'].update('')
-                    refresh_chats()
-                    refresh_docs()
-        if event == '-SEARCH-':
-            query = values.get('-USER_INPUT-') or ''
-            if not query.strip():
-                sg.popup('请输入检索查询')
-            else:
-                try:
-                    results = retrieval_module.retrieve_relevant(current_lib, query.strip(), k=10, data_root=DATA_ROOT, api_key=values.get('-API_KEY-'))
-                except Exception as e:
-                    results = []
-                    log.exception('retrieval error')
-                results_cache = results
-                display = []
-                for i, r in enumerate(results):
-                    score = r.get('score')
-                    src = r.get('meta', {}).get('source', '')
-                    snippet = (r.get('text') or '')[:200].replace('\n', ' ')
-                    display.append(f"[{i}] score:{score:.3f} src:{src} snippet:{snippet}")
-                window['-RESULT_LIST-'].update(display)
-                window['-RESULT_VIEW-'].update('')
-                # store last query for highlighting
-                last_query = query
-        if event == '-RESULT_LIST-':
-            sel = values.get('-RESULT_LIST-')
-            if sel:
-                s = sel[0]
-                # parse index from display
-                try:
-                    idx = int(s.split(']')[0].lstrip('['))
-                    r = results_cache[idx]
-                    text = r.get('text') or ''
-                    # gather meta
-                    meta = r.get('meta') or {}
-                    src = meta.get('source') or meta.get('file') or ''
-                    score = r.get('score')
-                    # highlight based on last_query
-                    try:
-                        h = _highlight_text(text, last_query)
-                    except Exception:
-                        h = text
-                    # formatted view: source, score, snippet, and full text
-                    parts = []
-                    parts.append(f"来源: {src}")
-                    if score is not None:
-                        try:
-                            parts.append(f"相似度: {float(score):.4f}")
-                        except Exception:
-                            parts.append(f"相似度: {score}")
-                    parts.append('\n')
-                    parts.append(h[:20000])
-                    if len(text) > 20000:
-                        parts.append('\n\n(内容已截断)')
-                    window['-RESULT_VIEW-'].update('\n'.join(parts))
-                except Exception:
-                    window['-RESULT_VIEW-'].update('')
-        if event == '-INSERT_RESULT-':
-            sel = values.get('-RESULT_LIST-')
-            if sel:
-                try:
-                    idx = int(sel[0].split(']')[0].lstrip('['))
-                    r = results_cache[idx]
-                    cur = values.get('-USER_INPUT-') or ''
-                    add = (r.get('text') or '')[:1000]
-                    window['-USER_INPUT-'].update(cur + '\n' + add)
-                except Exception:
-                    pass
-        if event == '-INSERT_SYS-':
-            sel = values.get('-RESULT_LIST-')
-            if sel:
-                try:
-                    idx = int(sel[0].split(']')[0].lstrip('['))
-                    r = results_cache[idx]
-                    system_contexts.append(r.get('text') or '')
-                    sg.popup('已将选中文档片段加入系统上下文')
-                except Exception:
-                    pass
-        if event == '-INSERT_AS_ASSIST-':
-            sel = values.get('-RESULT_LIST-')
-            if sel and current_chat_id:
-                try:
-                    idx = int(sel[0].split(']')[0].lstrip('['))
-                    r = results_cache[idx]
-                    text_to_insert = r.get('text') or ''
-                    cm.append_assistant_message(current_lib, current_chat_id, text_to_insert)
-                    show_messages(current_chat_id)
-                    sg.popup('已将检索片段插入为助手消息')
-                except Exception:
-                    pass
-        if event == '-OPEN_DOC-':
-            sel = values.get('-DOC_LIST-')
-            if sel:
-                fn = sel[0]
-                path = os.path.join(DATA_ROOT, 'libraries', current_lib, 'docs', fn)
-                try:
-                    text = open(path, 'r', encoding='utf-8', errors='ignore').read()
-                except Exception:
-                    log.exception('open doc failed: %s', path)
-                    text = '无法读取文件内容'
-                window['-DOC_VIEW-'].update(text[:20000])
-        if event == '-DEL_DOC-':
-            sel = values.get('-DOC_LIST-')
-            if sel:
-                fn = sel[0]
-                path = os.path.join(DATA_ROOT, 'libraries', current_lib, 'docs', fn)
-                try:
-                    os.remove(path)
-                    refresh_docs()
-                    window['-DOC_VIEW-'].update('')
-                    # after deleting a document, rebuild vector store in background
-                    embed_provider = values.get('-EMBED_PROVIDER-') or 'openai'
-                    embed_model = values.get('-EMBED_MODEL-') or None
-                    run_in_background(vector_store_module.build_vector_store, current_lib, DATA_ROOT, values.get('-API_KEY-'), embed_provider, embed_model, event_key='-BG_BUILD-')
-                except Exception as e:
-                    log.exception('delete doc failed: %s', path)
-                    sg.popup_error(f'删除失败: {e}')
-        if event == '-SHOW_SOURCES-':
-            # display last retrieval contexts in the result view
-            if last_contexts:
-                parts = []
-                for i, c in enumerate(last_contexts):
-                    src = c.get('meta', {}).get('source', '')
-                    score = c.get('score')
-                    txt = (c.get('text') or '')[:2000].replace('\n', ' ')
-                    parts.append(f"[{i}] 来源: {src}  相似度: {score}\n{txt}\n")
-                window['-RESULT_VIEW-'].update('\n'.join(parts))
-            else:
-                sg.popup('暂无检索来源')
+                current_chat_id = _chat_id_from_label(selection[0])
+                show_messages(current_chat_id)
 
-        if event == '-SEND-':
-            text = values.get('-USER_INPUT-')
+        if event == "-DEL_CHAT-":
+            selection = values.get("-CHAT_LIST-")
+            if selection:
+                cm.delete_chat(current_lib, _chat_id_from_label(selection[0]))
+                current_chat_id = None
+                window["-CHAT_VIEW-"].update("")
+                refresh_chats()
+
+        if event == "-ADD_DOC-":
+            src = values.get("-DOC_PATH-")
+            if src and os.path.isfile(src):
+                dst = _docs_dir(current_lib) / os.path.basename(src)
+                shutil.copy2(src, dst)
+                refresh_docs()
+                window["-SYNC_STATUS-"].update("文档已导入，正在同步向量库...")
+                run_in_background(_sync_from_values, current_lib, values, event_key="-BG_SYNC-")
+
+        if event == "-DEL_DOC-":
+            selection = values.get("-DOC_LIST-")
+            if selection:
+                path = _docs_dir(current_lib) / selection[0]
+                try:
+                    path.unlink()
+                    refresh_docs()
+                    window["-SYNC_STATUS-"].update("文档已删除，正在同步向量库...")
+                    run_in_background(_sync_from_values, current_lib, values, event_key="-BG_SYNC-")
+                except Exception as exc:
+                    log.exception("delete doc failed")
+                    sg.popup_error(f"删除失败：{exc}")
+
+        if event == "-BG_SYNC-":
+            payload = values.get(event) or {}
+            if payload.get("success"):
+                result = payload.get("result") or {}
+                inserted = result.get("inserted")
+                window["-SYNC_STATUS-"].update(f"向量库已同步：{inserted if inserted is not None else 0} chunks")
+            else:
+                window["-SYNC_STATUS-"].update(f"同步失败：{payload.get('error', 'unknown error')}")
+
+        if event == "-SHOW_SOURCES-":
+            window["-SOURCE_VIEW-"].update(_format_sources(last_contexts) if last_contexts else "暂无来源")
+
+        if event == "-SEND-":
+            text = (values.get("-USER_INPUT-") or "").strip()
             if not current_chat_id:
-                sg.popup('请选择或新建一个对话')
-            elif text and text.strip():
-                # append user message
-                cm.append_user_message(current_lib, current_chat_id, text.strip())
-                # use LCEL pipeline: summarize -> retrieve -> answer
-                provider = values.get('-PROVIDER-') or 'openai'
-                try:
-                    assistant_text, contexts = lcel_pipeline(
-                        current_lib,
-                        current_chat_id,
-                        text.strip(),
-                        cm,
-                        data_root=DATA_ROOT,
-                        api_key=values.get('-API_KEY-'),
-                        embedding_provider=values.get('-EMBED_PROVIDER-') or 'openai',
-                        embedding_model=values.get('-EMBED_MODEL-') or None,
-                        llm_provider=provider,
-                        llm_model=values.get('-MODEL-') or 'gpt-3.5-turbo',
-                        k=5,
-                    )
-                except Exception:
-                    log.exception('LCEL pipeline failed')
-                    contexts = []
-                    assistant_text = '（回退）系统暂时无法生成回答。'
-
-                # save last contexts for display
+                sg.popup("请先选择或新建一个对话")
+                continue
+            if not text:
+                continue
+            cm.append_user_message(current_lib, current_chat_id, text)
+            window["-SYNC_STATUS-"].update("正在同步并检索文档...")
+            try:
+                assistant_text, contexts = lcel_pipeline(
+                    current_lib,
+                    current_chat_id,
+                    text,
+                    cm,
+                    data_root=DATA_ROOT,
+                    api_key=None,
+                    base_url=values.get("-LLM_BASE_URL-") or None,
+                    embedding_api_key=None,
+                    embedding_base_url=values.get("-EMBED_BASE_URL-") or None,
+                    embedding_provider=values.get("-EMBED_PROVIDER-") or None,
+                    embedding_model=values.get("-EMBED_MODEL-") or None,
+                    llm_provider=values.get("-LLM_PROVIDER-") or None,
+                    llm_model=values.get("-LLM_MODEL-") or None,
+                    k=5,
+                )
                 last_contexts = contexts or []
-
-                # if attach option enabled, append sources to assistant message
-                attach = values.get('-ATTACH_SOURCES-')
                 store_text = assistant_text
-                if attach and last_contexts:
-                    s_parts = ["\n\n来源："]
-                    for c in last_contexts:
-                        src = c.get('meta', {}).get('source', '')
-                        score = c.get('score')
-                        snippet = (c.get('text') or '')[:500].replace('\n', ' ')
-                        s_parts.append(f"来源:{src} 相似度:{score}\n{snippet}\n---\n")
-                    store_text = assistant_text + '\n'.join(s_parts)
-
+                if values.get("-ATTACH_SOURCES-") and last_contexts:
+                    store_text += "\n\n来源：\n" + _format_sources(last_contexts, compact=True)
                 cm.append_assistant_message(current_lib, current_chat_id, store_text)
                 show_messages(current_chat_id)
-                window['-USER_INPUT-'].update('')
+                window["-SOURCE_VIEW-"].update(_format_sources(last_contexts))
+                window["-SYNC_STATUS-"].update("完成")
+                window["-USER_INPUT-"].update("")
+            except Exception as exc:
+                log.exception("send failed")
+                sg.popup_error(f"处理失败：{exc}")
 
     window.close()
 
 
-if __name__ == '__main__':
+def _list_libraries():
+    root = os.path.join(DATA_ROOT, "libraries")
+    if not os.path.exists(root):
+        return ["base"]
+    libs = [item.name for item in os.scandir(root) if item.is_dir()]
+    return libs or ["base"]
+
+
+def _docs_dir(library_name: str):
+    from pathlib import Path
+
+    return Path(DATA_ROOT) / "libraries" / library_name / "docs"
+
+
+def _format_message(message: dict) -> str:
+    role = message.get("role", "").upper()
+    text = message.get("text", "")
+    return f"{role}:\n{text}\n"
+
+
+def _chat_id_from_label(label: str) -> str:
+    return label.split("(")[-1].strip(")") if "(" in label and label.endswith(")") else label
+
+
+def _format_sources(contexts, compact: bool = False) -> str:
+    parts = []
+    limit = 260 if compact else 1200
+    for i, context in enumerate(contexts):
+        source = context.get("meta", {}).get("source", "")
+        score = context.get("score")
+        text = (context.get("text") or "")[:limit].replace("\n", " ")
+        parts.append(f"[{i + 1}] {source} score={score}\n{text}")
+    return "\n\n".join(parts)
+
+
+def _sync_from_values(library_name: str, values: dict):
+    return sync_vector_store(
+        library_name,
+        data_root=DATA_ROOT,
+        api_key=None,
+        embedding_provider=values.get("-EMBED_PROVIDER-") or None,
+        embedding_model=values.get("-EMBED_MODEL-") or None,
+        embedding_base_url=values.get("-EMBED_BASE_URL-") or None,
+    )
+
+
+if __name__ == "__main__":
     main()
