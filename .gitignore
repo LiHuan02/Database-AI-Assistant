@@ -4,3 +4,6 @@ __pycache__/
 *.pyc
 .streamlit/secrets.toml
 persist/
+build/
+dist/
+*.spec.bak

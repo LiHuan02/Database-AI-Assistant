@@ -1,0 +1,105 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller DatabaseAIAssistant.spec --clean --noconfirm
+
+      - name: Prepare release archive
+        shell: bash
+        run: |
+          OS="${{ matrix.os }}"
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          if [[ "$OS" == "windows-latest" ]]; then
+            PLATFORM="win-amd64"
+            ARCHIVE_NAME="DatabaseAIAssistant-v${VERSION}-${PLATFORM}.zip"
+          elif [[ "$OS" == "ubuntu-latest" ]]; then
+            PLATFORM="linux-amd64"
+            ARCHIVE_NAME="DatabaseAIAssistant-v${VERSION}-${PLATFORM}.tar.gz"
+          else
+            PLATFORM="darwin-amd64"
+            ARCHIVE_NAME="DatabaseAIAssistant-v${VERSION}-${PLATFORM}.tar.gz"
+          fi
+
+          RELEASE_DIR="DatabaseAIAssistant-v${VERSION}-${PLATFORM}"
+          mkdir -p "release/${RELEASE_DIR}"
+
+          cp -r dist/DatabaseAIAssistant/* "release/${RELEASE_DIR}/" 2>/dev/null || true
+
+          # Supplementary files
+          cp .env.example "release/${RELEASE_DIR}/"
+          cp README.md "release/${RELEASE_DIR}/"
+          cp -r scripts "release/${RELEASE_DIR}/"
+
+          # Make executable on Unix
+          if [[ "$OS" != "windows-latest" ]]; then
+            chmod +x "release/${RELEASE_DIR}/DatabaseAIAssistant"
+          fi
+
+          cd release
+          if [[ "$OS" == "windows-latest" ]]; then
+            7z a "${ARCHIVE_NAME}" "${RELEASE_DIR}"
+          else
+            tar -czf "${ARCHIVE_NAME}" "${RELEASE_DIR}"
+          fi
+
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+          echo "ARCHIVE_PATH=release/${ARCHIVE_NAME}" >> $GITHUB_ENV
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Database AI Assistant v${{ github.ref_name }}"
+          body: |
+            ## Database AI Assistant v${{ github.ref_name }}
+
+            First packaged release. Portable application — no Python installation required.
+
+            ### Quick Start
+            1. Download the archive for your platform
+            2. Extract it to any directory
+            3. Copy `.env.example` to `.env` and fill in your API keys
+            4. Run `DatabaseAIAssistant` (or `DatabaseAIAssistant.exe` on Windows)
+            5. Open http://localhost:8501 in your browser
+
+            ### Optional: Auto-start
+            See `scripts/` directory for platform-specific auto-start setup:
+            - Windows: `powershell -ExecutionPolicy Bypass -File scripts/install_startup_windows.ps1`
+            - Linux: `bash scripts/install_startup_linux.sh`
+            - macOS: `bash scripts/install_startup_macos.sh`
+
+            ### Notes
+            - Data is stored in a `data/` directory created next to the executable
+            - First run may be slower as chromadb initializes its database
+            - macOS users: if Gatekeeper blocks the app, right-click → Open the first time
+          files: ${{ env.ARCHIVE_PATH }}
+          draft: false
+          prerelease: false

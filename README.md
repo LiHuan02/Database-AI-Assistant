@@ -63,6 +63,44 @@ DashScope 等兼容接口通常需要设置独立的 `BASE_URL`，并且 embeddi
 - `src/loaders/`：文档加载器。
 - `src/utils/`：配置和日志工具。
 
+## 打包
+
+构建独立可分发的可执行文件（无需安装 Python）：
+
+```bash
+pip install pyinstaller
+pyinstaller DatabaseAIAssistant.spec --clean --noconfirm
+# 输出在 dist/DatabaseAIAssistant/
+```
+
+## 发布版本使用
+
+1. 从 [GitHub Releases](https://github.com/LiHuan02/Database-AI-Assistant/releases) 下载对应平台的压缩包
+2. 解压到任意目录
+3. 复制 `.env.example` 为 `.env` 并填入 API 密钥
+4. 运行 `DatabaseAIAssistant.exe` (Windows) 或 `./DatabaseAIAssistant` (Linux/Mac)
+5. 浏览器打开 http://localhost:8501
+
+### 开机自启
+
+- **Windows**: 右键 `scripts/install_startup_windows.ps1` → "使用 PowerShell 运行"，或在终端执行：
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts/install_startup_windows.ps1
+  ```
+  禁用：删除开始菜单启动文件夹中的 `DatabaseAIAssistant.lnk` 快捷方式
+
+- **Linux**:
+  ```bash
+  bash scripts/install_startup_linux.sh
+  ```
+  禁用：`rm ~/.config/autostart/database-ai-assistant.desktop`
+
+- **macOS**:
+  ```bash
+  bash scripts/install_startup_macos.sh
+  ```
+  禁用：`launchctl unload ~/Library/LaunchAgents/com.database-ai-assistant.plist && rm ~/Library/LaunchAgents/com.database-ai-assistant.plist`
+
 ## 测试
 
 ```bash
