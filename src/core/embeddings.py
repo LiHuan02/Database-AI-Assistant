@@ -1,25 +1,14 @@
-"""向量模型封装：LLM 和 Embedding 使用完全独立的厂商、密钥和 base_url。"""
+"""
+Embedding model caller with retry support.
+"""
 
-from typing import Iterable, List, Optional
-import hashlib
 import logging
+import time
+from typing import List, Optional
 
-from utils.config import get_embedding_config, get_env
+from openai import OpenAI
 
 log = logging.getLogger(__name__)
-
-DEFAULT_DIM = 1536
-OPENAI_COMPATIBLE_PROVIDERS = {
-    "openai",
-    "openrouter",
-    "deepseek",
-    "siliconflow",
-    "dashscope",
-    "zhipu",
-    "moonshot",
-    "baichuan",
-    "compatible",
-}
 
 
 def get_embeddings(
@@ -29,86 +18,68 @@ def get_embeddings(
     model: Optional[str] = None,
     base_url: Optional[str] = None,
     batch_size: Optional[int] = None,
+    max_retries: int = 3,
 ) -> List[List[float]]:
-    """返回文本向量。
-
-    兼容接口的批量上限差异很大，默认每批 25 条，避免 DashScope 等厂商报
-    `batch size is invalid, it should not be larger than 25`。
-    """
-    clean_texts = _normalize_texts(texts)
-    if not clean_texts:
+    if not texts:
         return []
 
-    config = get_embedding_config(provider=provider, model=model, api_key=api_key, base_url=base_url)
-    provider_name = (config.provider or "openai").lower()
-    resolved_batch_size = max(1, int(batch_size or get_env("EMBEDDING_BATCH_SIZE", 25)))
+    if provider == "hash":
+        return _hash_embeddings(texts)
 
-    if provider_name == "hash":
-        return [_hash_vector(text, dim=DEFAULT_DIM) for text in clean_texts]
-
-    if provider_name in OPENAI_COMPATIBLE_PROVIDERS:
-        return _openai_compatible_embeddings(
-            clean_texts,
-            model=config.model,
-            api_key=config.api_key,
-            base_url=config.base_url,
-            batch_size=resolved_batch_size,
+    import os
+    resolved_key = api_key or os.getenv("EMBEDDING_API_KEY")
+    if not resolved_key:
+        raise ValueError(
+            "Embedding API key not set. Use EMBEDDING_API_KEY env var or API setting."
         )
+    resolved_model = model or os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    resolved_base = base_url or os.getenv("EMBEDDING_BASE_URL")
 
-    if provider_name == "local":
-        try:
-            from sentence_transformers import SentenceTransformer
+    client = OpenAI(api_key=resolved_key, base_url=resolved_base)
 
-            encoder = SentenceTransformer(config.model or "all-MiniLM-L6-v2")
-            embeddings = encoder.encode(clean_texts, show_progress_bar=False)
-            return [list(map(float, item)) for item in embeddings]
-        except Exception:
-            log.exception("本地向量模型调用失败")
-            raise
+    try:
+        batch = batch_size or 25
+        all_embeddings = []
+        for i in range(0, len(texts), batch):
+            chunk = texts[i:i + batch]
+            all_embeddings.extend(
+                _embed_with_retry(
+                    client, resolved_model, chunk, max_retries=max_retries,
+                )
+            )
+        return all_embeddings
+    except Exception as exc:
+        raise RuntimeError(f"Embedding failed: {exc}") from exc
 
-    raise ValueError(f"不支持的向量模型厂商：{config.provider}")
 
-
-def _openai_compatible_embeddings(
-    texts: List[str],
-    model: str,
-    api_key: Optional[str],
-    base_url: Optional[str],
-    batch_size: int,
+def _embed_with_retry(
+    client, model: str, texts: List[str], max_retries: int = 3,
 ) -> List[List[float]]:
-    import openai
-
-    kwargs = {}
-    if api_key:
-        kwargs["api_key"] = api_key
-    if base_url:
-        kwargs["base_url"] = base_url
-    client = openai.OpenAI(**kwargs)
-
-    vectors: List[List[float]] = []
-    for batch in _batched(texts, batch_size):
-        # OpenAI 兼容接口期望 input 是 str 或 list[str]，这里保证永远传 list[str]。
-        resp = client.embeddings.create(input=list(batch), model=model)
-        vectors.extend([item.embedding for item in resp.data])
-    return vectors
-
-
-def _normalize_texts(texts: Iterable[str]) -> List[str]:
-    normalized = []
-    for item in texts or []:
-        if item is None:
-            continue
-        text = str(item).strip()
-        if text:
-            normalized.append(text)
-    return normalized
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = client.embeddings.create(input=texts, model=model)
+            return [item.embedding for item in resp.data]
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                delay = (2 ** attempt) * 0.5
+                log.warning(
+                    "Embedding attempt %d/%d failed (%s), retrying in %.1fs…",
+                    attempt + 1, max_retries + 1, exc, delay,
+                )
+                time.sleep(delay)
+    raise last_exc
 
 
-def _batched(items: List[str], batch_size: int):
-    for start in range(0, len(items), batch_size):
-        yield items[start : start + batch_size]
-
-
-def _hash_vector(text: str, dim: int = DEFAULT_DIM) -> List[float]:
-    digest = hashlib.sha256(text.encode("utf-8")).digest()
-    return [(digest[i % len(digest)] / 255.0) * (1.0 - (i / dim)) for i in range(dim)]
+def _hash_embeddings(texts: List[str], dim: int = 1024) -> List[List[float]]:
+    import hashlib
+    embeddings = []
+    for text in texts:
+        seed = abs(int(hashlib.sha256(text.encode()).hexdigest(), 16))
+        emb = []
+        for i in range(dim):
+            seed = (seed * 1103515245 + 12345) & 0x7FFFFFFF
+            emb.append((seed % 1000) / 500.0 - 1.0)
+        embeddings.append(emb)
+    return embeddings

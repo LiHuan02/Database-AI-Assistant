@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(.venv/Scripts/python.exe -c \"import py_compile; files = ['src/utils/text_splitter.py', 'src/core/ingest.py', 'src/db/vector_store.py', 'src/core/llm.py', 'src/core/embeddings.py', 'src/utils/config.py', 'src/core/memory.py', 'src/core/chat_manager.py', 'src/core/pipeline.py']; [py_compile.compile\\(f, doraise=True\\) or print\\(f'OK: {f}'\\) for f in files]\")"
     ]
   }
 }

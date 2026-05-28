@@ -1,40 +1,56 @@
-"""文档入库：读取文件、切分文本、生成向量、写入 Chroma。"""
+"""
+Document ingestion: load, split, embed, and write to Chroma.
+Supports batch and single-document (incremental) modes.
+"""
 
+import logging
 from pathlib import Path
 from typing import List, Optional
-import os
-import uuid
 
 from core.embeddings import get_embeddings
 from db.chroma_client import ChromaClient
+from loaders.docx_loader import load_docx
+from loaders.md_loader import load_md
+from loaders.pdf_loader import load_pdf
+from loaders.txt_loader import load_txt
 from utils.text_splitter import split_text
 
+log = logging.getLogger(__name__)
 
-def load_file(path: str) -> str:
-    """根据扩展名读取文档内容。"""
-    file_path = Path(path)
-    ext = file_path.suffix.lower()
-    if ext == ".md":
-        from loaders.md_loader import load_md
+LOADER_MAP = {
+    ".txt": load_txt,
+    ".md": load_md,
+    ".pdf": load_pdf,
+    ".docx": load_docx,
+}
 
-        return load_md(path)
-    if ext == ".pdf":
-        from loaders.pdf_loader import load_pdf
 
-        return load_pdf(path)
-    if ext == ".docx":
-        from loaders.docx_loader import load_docx
+def _load_file(file_path: str) -> str:
+    suffix = Path(file_path).suffix.lower()
+    loader = LOADER_MAP.get(suffix)
+    if loader is None:
+        raise ValueError(f"Unsupported file type: {suffix}")
+    return loader(file_path)
 
-        return load_docx(path)
-    if ext == ".txt":
-        from loaders.txt_loader import load_txt
 
-        return load_txt(path)
-    try:
-        return file_path.read_text(encoding="utf-8")
-    except Exception:
-        return ""
+def _build_chunks(
+    texts: list[str],
+    metadatas: list[dict],
+    ids: list[str],
+    api_key, provider, model, base_url, batch_size,
+):
+    embeddings = get_embeddings(
+        texts,
+        api_key=api_key,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        batch_size=batch_size,
+    )
+    return {"ids": ids, "embeddings": embeddings, "metadatas": metadatas, "documents": texts}
 
+
+# ── batch ingest (used for full rebuild) ──────────────────────
 
 def ingest_documents(
     file_paths: List[str],
@@ -45,47 +61,119 @@ def ingest_documents(
     embedding_model: Optional[str] = None,
     embedding_base_url: Optional[str] = None,
     batch_size: Optional[int] = None,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
 ):
-    """把文档块写入指定知识库的 Chroma collection。"""
-    ids, texts, metadatas = [], [], []
-    for path in file_paths:
-        content = load_file(path)
-        if not content:
-            continue
-        source = os.path.basename(path)
-        for index, chunk in enumerate(split_text(content)):
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            ids.append(f"{source}:{index}:{uuid.uuid4()}")
-            texts.append(chunk)
-            metadatas.append({"source": source, "path": str(Path(path)), "chunk_index": index})
+    all_ids = []
+    all_embeddings = []
+    all_metadatas = []
+    all_documents = []
 
-    collection = ChromaClient(data_root=data_root).get_collection(library_name)
-    if not texts:
+    for file_path in file_paths:
+        doc_name = Path(file_path).name
+        raw_text = _load_file(file_path)
+        chunks = split_text(raw_text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        for i, chunk in enumerate(chunks):
+            all_ids.append(f"{library_name}:{doc_name}:{i}")
+            all_documents.append(chunk)
+            all_metadatas.append({
+                "library": library_name,
+                "doc_name": doc_name,
+                "chunk_index": i,
+                "source": file_path,
+            })
+
+    if not all_ids:
         return {"inserted": 0}
 
-    embeddings = get_embeddings(
-        texts,
-        api_key=api_key,
-        provider=embedding_provider,
-        model=embedding_model,
-        base_url=embedding_base_url,
-        batch_size=batch_size,
-    )
-    for start in range(0, len(texts), 100):
-        end = start + 100
-        collection.add(
-            ids=ids[start:end],
-            documents=texts[start:end],
-            metadatas=metadatas[start:end],
-            embeddings=embeddings[start:end],
+    total = 0
+    collection = ChromaClient(library_name, data_root=data_root).get_collection()
+    _batch = batch_size or 32
+    for offset in range(0, len(all_ids), _batch):
+        slice_ids = all_ids[offset:offset + _batch]
+        slice_docs = all_documents[offset:offset + _batch]
+        slice_meta = all_metadatas[offset:offset + _batch]
+        chunk_data = _build_chunks(
+            slice_docs, slice_meta, slice_ids,
+            api_key, embedding_provider, embedding_model, embedding_base_url, batch_size,
         )
-    return {"inserted": len(texts)}
+        collection.add(**chunk_data)
+        total += len(slice_ids)
+
+    return {"inserted": total}
 
 
-def build_vector_store(*args, **kwargs):
-    """兼容旧导入路径。"""
-    from db.vector_store import build_vector_store as _build_vector_store
+# ── incremental operations ────────────────────────────────────
 
-    return _build_vector_store(*args, **kwargs)
+def add_document_to_store(
+    file_path: str,
+    library_name: str,
+    data_root: str = "data",
+    api_key: Optional[str] = None,
+    embedding_provider: Optional[str] = None,
+    embedding_model: Optional[str] = None,
+    embedding_base_url: Optional[str] = None,
+    batch_size: Optional[int] = None,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+):
+    doc_name = Path(file_path).name
+    raw_text = _load_file(file_path)
+    chunks = split_text(raw_text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    ids = []
+    docs = []
+    metas = []
+    for i, chunk in enumerate(chunks):
+        ids.append(f"{library_name}:{doc_name}:{i}")
+        docs.append(chunk)
+        metas.append({
+            "library": library_name,
+            "doc_name": doc_name,
+            "chunk_index": i,
+            "source": file_path,
+        })
+
+    if not ids:
+        return {"inserted": 0}
+
+    collection = ChromaClient(library_name, data_root=data_root).get_collection()
+    total = 0
+    _batch = batch_size or 32
+    for offset in range(0, len(ids), _batch):
+        slice_ids = ids[offset:offset + _batch]
+        slice_docs = docs[offset:offset + _batch]
+        slice_meta = metas[offset:offset + _batch]
+        chunk_data = _build_chunks(
+            slice_docs, slice_meta, slice_ids,
+            api_key, embedding_provider, embedding_model, embedding_base_url, batch_size,
+        )
+        collection.add(**chunk_data)
+        total += len(slice_ids)
+
+    log.info("Added document '%s' to library '%s': %d chunks", doc_name, library_name, total)
+    return {"inserted": total}
+
+
+def remove_document_from_store(
+    doc_name: str,
+    library_name: str,
+    data_root: str = "data",
+):
+    collection = ChromaClient(library_name, data_root=data_root).get_collection()
+    try:
+        collection.delete(where={"doc_name": doc_name})
+        log.info("Removed document '%s' from library '%s'", doc_name, library_name)
+    except Exception:
+        log.exception("Failed to delete chunks for document '%s'", doc_name)
+
+
+def replace_document_in_store(
+    file_path: str,
+    library_name: str,
+    data_root: str = "data",
+    **kwargs,
+):
+    doc_name = Path(file_path).name
+    remove_document_from_store(doc_name, library_name, data_root=data_root)
+    return add_document_to_store(file_path, library_name, data_root=data_root, **kwargs)
