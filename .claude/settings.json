@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"exit: $?\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('launcher.py'\\).read\\(\\)\\); print\\('launcher.py syntax OK'\\)\")",
+      "Bash(py -c \"import ast; ast.parse\\(open\\('launcher.py'\\).read\\(\\)\\); print\\('launcher.py syntax OK'\\)\")",
+      "Bash(py -m pip list)",
+      "Bash(py -m pip install pyinstaller)",
+      "Bash(py -c \"import streamlit, chromadb, langchain_text_splitters, openai, dotenv, pdfplumber, docx, markdown; print\\('All deps available'\\)\")",
+      "Bash(py -m PyInstaller DatabaseAIAssistant.spec --clean --noconfirm)",
+      "Bash(timeout 15 ./DatabaseAIAssistant.exe)",
+      "Bash(echo \"EXIT_CODE=$?\")",
+      "Bash(py -c \"import streamlit; from pathlib import Path; p = Path\\(streamlit.__file__\\).parent.parent; dist_info = list\\(p.glob\\('streamlit-*.dist-info'\\)\\); print\\(dist_info[0] if dist_info else 'NOT FOUND'\\)\")",
+      "Bash(timeout 20 ./DatabaseAIAssistant.exe)",
+      "Bash(cp \"e:/ForWork/VSCode/DatabaseAIAssistant/Database-AI-Assistant/.env\" \"e:/ForWork/VSCode/DatabaseAIAssistant/Database-AI-Assistant/dist/.env\")",
+      "Bash(timeout 25 ./DatabaseAIAssistant.exe)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git tag *)",
+      "Bash(git ls-remote *)",
+      "Bash(git ls-tree *)",
+      "Bash(grep -i \"\\\\.env$\\\\|secret\\\\|key\\\\|credential\\\\|token\")",
+      "Bash(xargs -I{} grep -l \"sk-\\\\|api_key\\\\|API_KEY\\\\|apiKey\\\\|token\\\\|secret\" \"e:/ForWork/VSCode/DatabaseAIAssistant/Database-AI-Assistant/{}\")"
+    ]
+  }
+}

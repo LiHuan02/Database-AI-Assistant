@@ -51,7 +51,7 @@ jobs:
           RELEASE_DIR="DatabaseAIAssistant-v${VERSION}-${PLATFORM}"
           mkdir -p "release/${RELEASE_DIR}"
 
-          cp -r dist/DatabaseAIAssistant/* "release/${RELEASE_DIR}/" 2>/dev/null || true
+          cp "dist/${EXE_NAME}" "release/${RELEASE_DIR}/"
 
           # Supplementary files
           cp .env.example "release/${RELEASE_DIR}/"
