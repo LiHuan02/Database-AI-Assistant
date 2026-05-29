@@ -28,6 +28,7 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # 保留 .spec 打包，这是正确的
       - name: Build with PyInstaller
         run: pyinstaller DatabaseAIAssistant.spec --clean --noconfirm
 
@@ -40,17 +41,21 @@ jobs:
           if [[ "$OS" == "windows-latest" ]]; then
             PLATFORM="win-amd64"
             ARCHIVE_NAME="DatabaseAIAssistant-v${VERSION}-${PLATFORM}.zip"
+            EXE_NAME="DatabaseAIAssistant.exe"
           elif [[ "$OS" == "ubuntu-latest" ]]; then
             PLATFORM="linux-amd64"
             ARCHIVE_NAME="DatabaseAIAssistant-v${VERSION}-${PLATFORM}.tar.gz"
+            EXE_NAME="DatabaseAIAssistant"
           else
             PLATFORM="darwin-amd64"
             ARCHIVE_NAME="DatabaseAIAssistant-v${VERSION}-${PLATFORM}.tar.gz"
+            EXE_NAME="DatabaseAIAssistant"
           fi
 
           RELEASE_DIR="DatabaseAIAssistant-v${VERSION}-${PLATFORM}"
           mkdir -p "release/${RELEASE_DIR}"
 
+          # ===== 核心修复：单文件直接用 cp，不要加 /* =====
           cp "dist/${EXE_NAME}" "release/${RELEASE_DIR}/"
 
           # Supplementary files
@@ -60,7 +65,7 @@ jobs:
 
           # Make executable on Unix
           if [[ "$OS" != "windows-latest" ]]; then
-            chmod +x "release/${RELEASE_DIR}/DatabaseAIAssistant"
+            chmod +x "release/${RELEASE_DIR}/${EXE_NAME}"
           fi
 
           cd release
