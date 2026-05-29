@@ -13,7 +13,7 @@ from PyInstaller.utils.hooks import (
 
 block_cipher = None
 
-# --- Streamlit static assets (frontend HTML/JS/CSS) and metadata ---
+# --- Streamlit 静态资源 ---
 streamlit_datas = []
 try:
     import streamlit
@@ -25,9 +25,7 @@ try:
     # Package metadata (dist-info) — needed for importlib.metadata.version()
     site_packages = streamlit_root.parent
     for dist_info in site_packages.glob("streamlit-*.dist-info"):
-        dest = dist_info.name
-        streamlit_datas.append((str(dist_info), dest))
-    # Also include altair, chromadb, and key package metadata
+        streamlit_datas.append((str(dist_info), dist_info.name))
     for pkg in ["altair", "chromadb", "openai", "langchain", "langchain_text_splitters",
                  "pydantic", "pdfplumber", "python-docx", "markdown"]:
         for dist_info in site_packages.glob(f"{pkg}-*.dist-info"):
@@ -35,14 +33,17 @@ try:
 except Exception:
     pass
 
-# --- chromadb data files ---
-chromadb_datas = collect_data_files("chromadb")
+# --- 自动收集子模块（解决动态导入问题） ---
+streamlit_hidden  = collect_submodules("streamlit")
+chromadb_hidden   = collect_submodules("chromadb")
+onnxruntime_hidden = collect_submodules("onnxruntime")
 
-# --- onnxruntime native binaries ---
+# --- chromadb / onnxruntime 数据文件 ---
+chromadb_datas = collect_data_files("chromadb")
 onnx_datas = collect_data_files("onnxruntime")
 onnx_binaries = collect_dynamic_libs("onnxruntime")
 
-# --- Application data files bundled into the executable ---
+# --- 应用数据文件 ---
 add_datas = [
     ("src", "src"),
     (".streamlit", ".streamlit"),
@@ -58,44 +59,18 @@ a = Analysis(
     binaries=onnx_binaries,
     datas=add_datas,
     hiddenimports=[
-        # Streamlit
-        "streamlit",
-        "streamlit.web.cli",
-        "streamlit.web.bootstrap",
-        "streamlit.runtime",
-        "streamlit.runtime.scriptrunner",
-        "streamlit.commands",
-        "streamlit.elements",
-        "streamlit.proto",
-        "streamlit.watcher",
-        "streamlit.watcher.local_sources_watcher",
-        # ChromaDB
-        "chromadb",
-        "chromadb.api",
-        "chromadb.config",
-        "chromadb.db",
-        "chromadb.db.impl.sqlite",
-        "chromadb.segment",
-        "chromadb.segment.impl.vector.brute_force_index",
-        "chromadb.types",
-        # onnxruntime
-        "onnxruntime",
-        "onnxruntime.capi",
-        # OpenAI client
+        *streamlit_hidden,        # ← 自动包含所有 streamlit 子模块
+        *chromadb_hidden,         # ← 自动包含所有 chromadb 子模块
+        *onnxruntime_hidden,      # ← 自动包含所有 onnxruntime 子模块
         "openai",
-        # Document processing
         "pdfplumber",
         "docx",
         "markdown",
-        # LangChain
         "langchain_text_splitters",
-        # Config
         "dotenv",
-        # Networking / serialization
         "httpx",
         "httpcore",
         "urllib3",
-        # Streamlit UI dependencies
         "tornado",
         "watchdog",
         "altair",
@@ -111,7 +86,6 @@ a = Analysis(
         "yaml",
         "overrides",
         "tenacity",
-        # Misc
         "packaging",
         "tqdm",
         "certifi",
@@ -123,7 +97,6 @@ a = Analysis(
         "tkinter",
         "_tkinter",
         "matplotlib",
-        "pandas",
         "scipy",
         "PIL",
         "numpy.core._dotblas",
